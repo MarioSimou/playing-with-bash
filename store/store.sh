@@ -1,104 +1,110 @@
 #!/bin/bash
 
+# Author: Mario Simou
+# Desc: A key-value storage written with shell scripting/bash 
+
+#  store.sh -n db SET hello world
+#  store.sh -n db GET hello
+#  store.sh -n db DEL hello
+
 set -e 
 
-store_name="db"
-store_path="$PWD/$store_name"
-arguments="$@"
-command=""
-values=()
-i=0
+declare store_name="db"
+declare store_dir="$PWD"
 
-if [[ ! -e $store_path ]]; then
-    echo "" > $store_path
-fi
-
-for arg in ${arguments}; do
-    if [[ i -eq 0 ]]; then
-        command="$arg"
-        ((i++))
-        continue
-    fi
-
-    values=(${values[@]} $arg)
+while getopts "n:" opt; do
+    case $opt in
+        n)
+            store_name="$OPTARG";;
+        \?)
+            printf "Uknown option: ${OPTARG}" >&2 
+            exit 1;;
+    esac
 done
 
-if [[ ! command ]]; then
-    printf "Error: Command not found\n"
-    exit 1
-fi
+# Ignores the indices for opts
+shift $(( OPTIND -1 ))
 
-if [[ ${#values[@]} -eq 0 ]]; then 
-    printf "Error: Please provide some values for '%s'\n" $command
-    exit 1
-fi
+declare -r store_path="${store_dir}/${store_name}"
+declare -r command="$1"
+
+[[ ! $command ]] && printf "Error: Command not found\n" >&2 && exit 1
+
+# we ensure that user has passed at least one argument
+shift
+
+function ok {
+    printf "ok\n"
+    exit 0
+} 
 
 function set {
-    local key="$1"
-    local value="$2"
+    declare -r key="$1"
+    declare -r value="$2"
 
-    if [[ ! value ]]; then
-        printf "Error: Provide a value for key '%s'\n" $key
-        exit 1
-    fi
+    [[ ! $key ]] && printf "Error: Please provide a valid key for SET command\n" >&2 && exit 1
+    [[ ! $value ]] &&  printf "Error: Provide a value for key '%s'\n" $key && exit 1
 
-    local match=$(grep -n $key $store_path)
+    declare -r match=$(grep -n $key $store_path 2> /dev/null )
 
     if [[ $match ]]; then 
-        local token=$(echo $match | awk -F ':' '{ print $2 }')
+        declare -r old_pair=$(echo $match | awk -F ':' '{ print $2 }')
 
-        if $(sed -i '' "s/$token/$key=$value/" $store_path); then 
-            printf "ok\n"
-            exit 0
+        if $(sed -i '' "s/$old_pair/$key=$value/" $store_path 2> /dev/null); then 
+            ok
         else
             printf "Error: Failed to set key '%s'\n" $key 
             exit 1
         fi
     else
-        printf "%s=%s" $key $value >> $store_path
+        if [[ -e $store_path ]]; then 
+            printf "%s=%s\n" $key $value >> $store_path
+        else 
+            printf "%s=%s\n" $key $value > $store_path
+        fi
+        ok
     fi
 }
 
 function get {
-    local key="$1"
-    local key_line=$(grep -n $key $store_path | awk -F ':' '{ print $1 }')
-
-    if [[ ! $key_line ]]; then
-        printf "Error: Key '%s' not found\n" $key
-        exit 1
+    declare -r key="$1"
+    
+    [[ ! $key ]] && printf "Error: Please provide a valid key for GET command\n" >&2 && exit 1
+    
+    declare -r -i key_line=$(grep -n $key $store_path 2> /dev/null | awk -F ':' '{ print $1 }')
+    
+    if (( ! $key_line )); then 
+        printf "Error: Key '%s' not found\n" $key && exit 1
     fi
 
-    local value=$(sed -n ${key_line}p $store_path | awk -F '=' '{ print $2 }')
+    declare -r value=$(sed -n ${key_line}p $store_path | awk -F '=' '{ print $2 }')
 
     printf "$value\n"
     exit 0
 }  
 
 function del {
-    local key="$1"
-    local key_line=$(grep -n $key $store_path | awk -F ':' '{ print $1 }')
+    declare -r key="$1"
+    declare -r -i key_line=$(grep -n $key $store_path 2> /dev/null | awk -F ':' '{ print $1 }')
 
-    if [[ ! $key_line ]]; then
-        printf "Error: Key '%s' not found\n" $key
-        exit 1
+    if (( ! $key_line )); then 
+        printf "Error: Key '%s' not found\n" $key && exit 1
     fi
 
     if $(sed -i '' "${key_line}d" $store_path); then
-        printf "ok\n"
-        exit 0
+        ok
     else
         printf "Error: Failed to remove key '%s'\n" $key    
     fi
 }
 
 case $command in
-    SET)
-        set ${values[@]};;
-    GET)
-        get ${values[@]};;
-    DEL)
-        del ${values[@]};;
+    SET|set)   
+        set $@;;
+    GET|get)
+        get $@;;
+    DEL|del)
+        del $@;;
     *)
-        printf "Error: Command is not supported\n"
-        exit 1  
+        printf "Error: Command is not supported\n" >&2 && exit 1;;
 esac
